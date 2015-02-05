@@ -2,21 +2,91 @@
 #include <linux/module.h>
 #include <linux/syscalls.h>
 #include <linux/unistd.h>
-
+#include <linux/sched.h>
+#include <asm/current.h>
+#include <linux/list.h>
+#include <asm/errno.h>
+#include <linux/uaccess.h>
 unsigned long **sys_call_table;
-#define REGULAR_USER_UID (uid_t)1000
+
+/*
+void setProcessState(int pid, long newState){
+}
+
+long getProcessState(int pid){
+}
+*/
+
+// information our module needs
+#define n_processes 100 		// we only deal with lists of 100 processes
+unsigned short target_uid = 0; 	// the uid of the current target process to smite or unsmite
+int num_pids_smited = 0;		// the number of processes to smite or unsmite
+int smited_pids[n_processes];	// the pids of the smited processes
+long pid_states[n_processes];	// the previous statuses of the smited processes
 
 // Our new kernel module function for SMITING
-asmlinkage long (*ref_sys_cs3013_syscall1)(void); // store the old one
-asmlinkage long new_sys_cs3013_syscall1(void) {
-	printk(KERN_INFO "\"’Hello world?!’ More like ’Goodbye1, world!’ EXTERMINATE!\" -- Dalek\n");
+asmlinkage long (*ref_sys_cs3013_syscall1)(void); // store the old function pointer
+asmlinkage long new_sys_cs3013_syscall1(unsigned short* p_target_uid, int* p_num_pids_smited, int* p_smited_pids, long* p_pid_states) {
+	//get the current task_struct
+	//struct task_struct current_task_struct = get_current();
+	
+	// only smite if we're root
+	//int current_user_id = 
+	
+	// check validity of arguments passed by caller. If any of them couldn't copy any bytes (didn't return 0 bytes not copied), return an error code.
+	if (copy_from_user(&target_uid, p_target_uid, sizeof(unsigned short)) != 0){
+		printk(KERN_INFO "\"SMITE ERROR: Invalid pointer to target UID!\" -- Smiter\n");
+		return EFAULT;
+	}
+		
+	printk(KERN_INFO "\"Smiting users of ID %d\" -- Smiter\n", target_uid);
+	
+	num_pids_smited=7;
+
+	
+	/*
+	// search for processes with this user ID.  
+	int num_processes=0; // keep track of the number of processes added to the array
+	while (smited_pids[num_processes-1]=getNextPIDfromUser(target_uid)){
+		pid_states[i]=getProcess(smited_pids[num_processes-1]);
+		setProcessState(smited_pids[num_processes-1], SMITED);
+		num_processes++;
+	}
+	*/
+	
+	// pass information back to the invoking user space call by filling the given pointers.
+	if (   (copy_to_user(p_num_pids_smited, &num_pids_smited, sizeof(int)) != 0)
+		|| (copy_to_user(p_smited_pids, &smited_pids, num_pids_smited*sizeof(int*)) != 0)
+		|| (copy_to_user(p_pid_states, &pid_states, num_pids_smited*sizeof(long*))) != 0){
+			printk(KERN_INFO "\"SMITE ERROR: Invalid return pointers.\" -- Smiter\n");
+			return EFAULT;
+	}
+	
 	return 0;
 }
 
 // Our new kernel module function for UNSMITING
 asmlinkage long (*ref_sys_cs3013_syscall2)(void); // store the old one
-asmlinkage long new_sys_cs3013_syscall2(void) {
-	printk(KERN_INFO "\"’Hello world?!’ More like ’Goodbye2, world!’ EXTERMINATE!\" -- Dalek\n");
+asmlinkage long new_sys_cs3013_syscall2(int* p_num_pids_smited, int* p_smited_pids, long* p_pid_states) {
+	// check validity of arguments passed by caller.
+	// If any of them can't copy any bytes (didn't return 0 bytes not copied), return an error code.
+	// Note the order for short-circuit of the if statement
+	if (   (copy_from_user(&num_pids_smited, p_num_pids_smited, sizeof(int)) != 0)
+		|| (copy_from_user(&smited_pids, p_smited_pids, num_pids_smited*sizeof(int*)) != 0)
+		|| (copy_from_user(&pid_states, p_pid_states, num_pids_smited*sizeof(long*))) != 0){
+			printk(KERN_INFO "\"UNSMITE ERROR: Invalid argument pointers.\" -- Unsmiter\n");
+			return EFAULT;
+	}
+	
+	
+	printk(KERN_INFO "\"Un-Smiting processes.\" -- Unsmiter\n");
+	
+	/*
+	int i;
+	for (i=0;i<num_pids_smited; i++){
+		setProcessState(smited_pids[i], pid_states[i]);
+	}
+	*/
 	return 0;
 }
 
