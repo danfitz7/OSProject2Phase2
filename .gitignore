@@ -4,6 +4,10 @@
 *.obj
 *.elf
 
+#smiting
+/smiteLoader
+/testSmite/testSmite
+
 #Eclipse
 *.project
 .settings/*
