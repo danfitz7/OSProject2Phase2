@@ -7,52 +7,70 @@
 #include <linux/list.h>
 #include <asm/errno.h>
 #include <linux/uaccess.h>
+#include <asm/uaccess.h>
+#include <linux/pid.h>
 unsigned long **sys_call_table;
 
-/*
-void setProcessState(int pid, long newState){
-}
+// useful links
+// http://www.makelinux.net/books/lkd2/ch03lev1sec1
 
-long getProcessState(int pid){
-}
-*/
-
-// information our module needs
+// init vars to store results before returning them to the caller.
 #define n_processes 100 		// we only deal with lists of 100 processes
-unsigned short target_uid = 0; 	// the uid of the current target process to smite or unsmite
+unsigned short target_uid = -1; 	// the uid of the current target process to smite or unsmite
 int num_pids_smited = 0;		// the number of processes to smite or unsmite
 int smited_pids[n_processes];	// the pids of the smited processes
 long pid_states[n_processes];	// the previous statuses of the smited processes
+
+struct task_struct *task;		// pointer to the task_struct we're trying to smite/unsmite
+struct list_head *list;
+
+struct pid* pid_struct;
 
 // Our new kernel module function for SMITING
 asmlinkage long (*ref_sys_cs3013_syscall1)(void); // store the old function pointer
 asmlinkage long new_sys_cs3013_syscall1(unsigned short* p_target_uid, int* p_num_pids_smited, int* p_smited_pids, long* p_pid_states) {
 	//get the current task_struct
-	//struct task_struct current_task_struct = get_current();
+	struct task_struct* current_task_struct = get_current();
 	
 	// only smite if we're root
-	//int current_user_id = 
+	if(current_task_struct->real_cred->uid.val != 0){
+		printk(KERN_INFO "\"SMITE ERROR: Caller not root!\" -- Smiter\n");
+		return EACCES;
+	}
 	
-	// check validity of arguments passed by caller. If any of them couldn't copy any bytes (didn't return 0 bytes not copied), return an error code.
+	// Get the user ID to smite
+	// check validity of arguments passed by caller. If we couldn't copy any bytes (didn't return 0 bytes not copied), exit with an error code.
 	if (copy_from_user(&target_uid, p_target_uid, sizeof(unsigned short)) != 0){
 		printk(KERN_INFO "\"SMITE ERROR: Invalid pointer to target UID!\" -- Smiter\n");
 		return EFAULT;
 	}
-		
-	printk(KERN_INFO "\"Smiting users of ID %d\" -- Smiter\n", target_uid);
+	if (target_uid <= 0){
+		printk(KERN_INFO "\"Smiting users of ID %d\" -- Smiter\n", target_uid);
+	}else{
+		printk(KERN_INFO "\"SMITING ERROR: Invalid target UID.\" -- Smiter\n");
+		return EINVAL;
+	}
 	
-	num_pids_smited=7;
 
 	
-	/*
 	// search for processes with this user ID.  
-	int num_processes=0; // keep track of the number of processes added to the array
-	while (smited_pids[num_processes-1]=getNextPIDfromUser(target_uid)){
-		pid_states[i]=getProcess(smited_pids[num_processes-1]);
-		setProcessState(smited_pids[num_processes-1], SMITED);
-		num_processes++;
+	num_pids_smited = 0; // keep track of the number of processes added to the array (reset to 0)
+	
+	// TODO: this doesn't traveerse the entire linked list of processes and their children.
+	// Doing that BFS will require more work
+	// but it's a start for what we need to do with a process once we've found it.
+	
+	// http://stackoverflow.com/questions/11986893/when-does-task-struct-used
+	list_for_each(list, &current->children){
+		task = list_entry(list, struct task_struct, sibling);
+		/* task now points to one of current's children */
+		
+		num_pids_smited++;
+		smited_pids[num_pids_smited-1] = (long)get_task_pid(task, PIDTYPE_PID);// record the pid
+		pid_states[num_pids_smited-1] = task->state;	// record the original state
+		set_task_state(task, TASK_STOPPED);  			// SMITE!
 	}
-	*/
+
 	
 	// pass information back to the invoking user space call by filling the given pointers.
 	if (   (copy_to_user(p_num_pids_smited, &num_pids_smited, sizeof(int)) != 0)
@@ -81,12 +99,25 @@ asmlinkage long new_sys_cs3013_syscall2(int* p_num_pids_smited, int* p_smited_pi
 	
 	printk(KERN_INFO "\"Un-Smiting processes.\" -- Unsmiter\n");
 	
-	/*
-	int i;
-	for (i=0;i<num_pids_smited; i++){
-		setProcessState(smited_pids[i], pid_states[i]);
+	// loop through the smited processes, unsmite them
+	while (num_pids_smited>0){
+		// This might work...still confusion on PIDs vs pid structures and which functions are best to use
+		// (get_pid, get_pid_ns, find_get_pid, pid_task, 
+		
+		// http://tuxthink.blogspot.com/2012/07/module-to-find-task-from-its-pid.html
+		rcu_read_lock();
+		pid_struct = find_get_pid((pid_t)smited_pids[num_pids_smited-1]); // find the pid struct from the pid number
+		rcu_read_unlock();
+		task = pid_task(pid_struct, PIDTYPE_PID); 	//get the task_struct from the pid struct.
+		
+		//pid_struct = pid_task(find_vpid(pid), PIDTYPE_PID); // http://stackoverflow.com/questions/8547332/kernel-efficient-way-to-find-task-struct-by-pid
+		
+		//pid_struct =  find_pid((pid_t)smited_pids[num_pids_smited-1])
+		
+		task->state = pid_states[num_pids_smited-1];		// reset to previous state
+		num_pids_smited--;
 	}
-	*/
+
 	return 0;
 }
 
@@ -143,7 +174,7 @@ static int __init interceptor_start(void) {
 	if(!(sys_call_table = find_sys_call_table())) {
 		/* Well, that didn’t work.
 		 Cancel the module loading step. */
-		 printk(KERN_INFO "\"Virus Scanner Module couldn't find the sys call table!\r\n");
+		 printk(KERN_INFO "\"Smite Module couldn't find the sys call table!\r\n");
 		return -1;
 	}
 	/* Store a copy of all the existing functions */
@@ -167,7 +198,7 @@ static int __init interceptor_start(void) {
 static void __exit interceptor_end(void) {
 	/* If we don’t know what the syscall table is, don’t bother. */
 	if(!sys_call_table){
-		printk(KERN_INFO "\"Virus Scanner Module Unload Failed!\"\r\n");
+		printk(KERN_INFO "\"Smite Loader Module Unload Failed!\"\r\n");
 		return;
 	}
 	/* Revert all system calls to what they were before we began. */
