@@ -17,21 +17,20 @@ unsigned long **sys_call_table;
 
 // init vars to store results before returning them to the caller.
 #define n_processes 100 		// we only deal with lists of 100 processes
-unsigned short target_uid = -1; 	// the uid of the current target process to smite or unsmite
+struct task_struct *task;	// pointer to the task_struct we're trying to smite/unsmite
 int num_pids_smited = 0;		// the number of processes to smite or unsmite
 int smited_pids[n_processes];	// the pids of the smited processes
 long pid_states[n_processes];	// the previous statuses of the smited processes
 
-struct task_struct *task;		// pointer to the task_struct we're trying to smite/unsmite
-struct list_head *list;
-
-struct pid* pid_struct;
-
 // Our new kernel module function for SMITING
 asmlinkage long (*ref_sys_cs3013_syscall1)(void); // store the old function pointer
 asmlinkage long new_sys_cs3013_syscall1(unsigned short* p_target_uid, int* p_num_pids_smited, int* p_smited_pids, long* p_pid_states) {
+	unsigned short target_uid; 	// the uid of the current target process to smite or unsmite
+	long pid;					// pid of the current task_struct we're trying to smite/unsmite
+	int caller_pid = current->pid;	// get the pid of the calling process (so we can avoid smiting it)
+	
 	//get the current task_struct
-	struct task_struct* current_task_struct = get_current();
+	struct task_struct* current_task_struct = current;
 	
 	// only smite if we're root
 	if(current_task_struct->real_cred->uid.val != 0){
@@ -46,7 +45,7 @@ asmlinkage long new_sys_cs3013_syscall1(unsigned short* p_target_uid, int* p_num
 		return EFAULT;
 	}
 	if (target_uid > 0){
-		printk(KERN_INFO "\"Smiting users of ID %d\" -- Smiter\n", target_uid);
+		printk(KERN_INFO "\"Smiting users of ID %d (called from PID %d)\" -- Smiter\n", target_uid, caller_pid);
 	}else{
 		printk(KERN_INFO "\"SMITING ERROR: Invalid target UID.\" -- Smiter\n");
 		return EINVAL;
@@ -61,12 +60,16 @@ asmlinkage long new_sys_cs3013_syscall1(unsigned short* p_target_uid, int* p_num
 			break;
 		}
 		
-		// if the process (task) was started by the target user, smite it!
+		// if the process (task) was started by the target user, but is not the calling process, smite it!
 		if (task->real_cred->uid.val == target_uid){
-			num_pids_smited++;
-			smited_pids[num_pids_smited-1] = (long)get_task_pid(task, PIDTYPE_PID);// record the pid
-			pid_states[num_pids_smited-1] = task->state;	// record the original state
-			set_task_state(task, TASK_STOPPED);  			// SMITE!
+			pid = (long)get_task_pid(task, PIDTYPE_PID);	// get the PID of the process/task
+			if (pid != caller_pid){							// don't smite the caller!
+				num_pids_smited++;
+				smited_pids[num_pids_smited-1] = pid;			// record the pid
+				pid_states[num_pids_smited-1] = task->state;	// record the original state
+				set_task_state(task, TASK_STOPPED);  			// SMITE!
+				printk("\t\"Smited process %lu from state %lu\" -- Smiter\n", pid, pid_states[num_pids_smited-1]);
+			}
 		}
 	}
 	
@@ -112,17 +115,19 @@ asmlinkage long new_sys_cs3013_syscall1(unsigned short* p_target_uid, int* p_num
 // Our new kernel module function for UNSMITING
 asmlinkage long (*ref_sys_cs3013_syscall2)(void); // store the old one
 asmlinkage long new_sys_cs3013_syscall2(int* p_num_pids_smited, int* p_smited_pids, long* p_pid_states) {
+	struct pid* pid_struct;
+	
 	// check validity of arguments passed by caller.
 	// If any of them can't copy any bytes (didn't return 0 bytes not copied), return an error code.
 	// Note the order for short-circuit of the if statement
 	if (   (copy_from_user(&num_pids_smited, p_num_pids_smited, sizeof(int)) != 0)
 		|| (copy_from_user(&smited_pids, p_smited_pids, num_pids_smited*sizeof(int*)) != 0)
 		|| (copy_from_user(&pid_states, p_pid_states, num_pids_smited*sizeof(long*))) != 0){
-			printk(KERN_INFO "\"UNSMITE ERROR: Invalid argument pointers.\" -- Unsmiter\n");
+			printk(KERN_INFO "\"UNSMITE ERROR: Invalid argument pointers.\" -- Un-Smiter\n");
 			return EFAULT;
 	}
 	
-	printk(KERN_INFO "\"Un-Smiting processes.\" -- Unsmiter\n");
+	printk(KERN_INFO "\"Un-Smiting processes.\" -- Un-Smiter\n");
 	
 	// loop through the smited processes, unsmite them
 	while (num_pids_smited>0){
@@ -140,6 +145,9 @@ asmlinkage long new_sys_cs3013_syscall2(int* p_num_pids_smited, int* p_smited_pi
 		if (pid_states[num_pids_smited-1] == 0){
 			wake_up_process(task); // don't forget to wake up processes!
 		}
+		
+		printk("\t\"Un-Smited process %d (%lu) to state %lu\" -- Un-Smiter\n", smited_pids[num_pids_smited-1], (long)pid_struct, pid_states[num_pids_smited-1]);
+
 		
 		num_pids_smited--;
 	}

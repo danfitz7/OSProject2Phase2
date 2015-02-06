@@ -79,12 +79,18 @@ void rabbit(){
 	char* strArgumentsList[] = {strCommand, strSleepTime, NULL};
 	
 	int p=0;
+	long pid;
+	printf("Spawning children...");
 	startTime = getTime();
 	for (p=0;p<NUM_CHILDREN;p++){
-		if (fork()==0){ //if we're the child
+		pid = fork();
+		if (pid==0){ //if we're the child
 			execvp("sleep", strArgumentsList);
+		}else{
+			printf("\tchild pid %lu\n", pid);
 		}
 	}
+	printf("This parent is pid %d\n", getpid());
 }
 
 // Main test program
