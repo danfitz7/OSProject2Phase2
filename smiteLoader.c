@@ -13,6 +13,7 @@ unsigned long **sys_call_table;
 
 // useful links
 // http://www.makelinux.net/books/lkd2/ch03lev1sec1
+// http://www.tldp.org/LDP/tlk/ds/ds.html
 
 // init vars to store results before returning them to the caller.
 #define n_processes 100 		// we only deal with lists of 100 processes
@@ -44,33 +45,30 @@ asmlinkage long new_sys_cs3013_syscall1(unsigned short* p_target_uid, int* p_num
 		printk(KERN_INFO "\"SMITE ERROR: Invalid pointer to target UID!\" -- Smiter\n");
 		return EFAULT;
 	}
-	if (target_uid <= 0){
+	if (target_uid > 0){
 		printk(KERN_INFO "\"Smiting users of ID %d\" -- Smiter\n", target_uid);
 	}else{
 		printk(KERN_INFO "\"SMITING ERROR: Invalid target UID.\" -- Smiter\n");
 		return EINVAL;
 	}
 	
-
-	
+		
 	// search for processes with this user ID.  
 	num_pids_smited = 0; // keep track of the number of processes added to the array (reset to 0)
-	
-	// TODO: this doesn't traveerse the entire linked list of processes and their children.
-	// Doing that BFS will require more work
-	// but it's a start for what we need to do with a process once we've found it.
-	
-	// http://stackoverflow.com/questions/11986893/when-does-task-struct-used
-	list_for_each(list, &current->children){
-		task = list_entry(list, struct task_struct, sibling);
-		/* task now points to one of current's children */
+	for_each_process(task){ // for (p=&init_task; (p=next_task(p)) != &init_task;)
+	// break out of the loop if we've already smited 100 processes.
+		if (num_pids_smited>=100){
+			break;
+		}
 		
-		num_pids_smited++;
-		smited_pids[num_pids_smited-1] = (long)get_task_pid(task, PIDTYPE_PID);// record the pid
-		pid_states[num_pids_smited-1] = task->state;	// record the original state
-		set_task_state(task, TASK_STOPPED);  			// SMITE!
+		// if the process (task) was started by the target user, smite it!
+		if (task->real_cred->uid.val == target_uid){
+			num_pids_smited++;
+			smited_pids[num_pids_smited-1] = (long)get_task_pid(task, PIDTYPE_PID);// record the pid
+			pid_states[num_pids_smited-1] = task->state;	// record the original state
+			set_task_state(task, TASK_STOPPED);  			// SMITE!
+		}
 	}
-
 	
 	// pass information back to the invoking user space call by filling the given pointers.
 	if (   (copy_to_user(p_num_pids_smited, &num_pids_smited, sizeof(int)) != 0)
@@ -82,6 +80,34 @@ asmlinkage long new_sys_cs3013_syscall1(unsigned short* p_target_uid, int* p_num
 	
 	return 0;
 }
+
+
+/* Other useful process tree traversal codes and macros
+	// obtain the process descriptor of the parent 
+	struct task_struct *my_parent = current->parent;
+	
+	// get to the init task
+	for (task = current; task != &init_task; task = task-> parent)
+	
+	// obtain the next task in the list, given any valid task
+	list_entry(task->task.next, struct task_struct, tasks)
+
+	// obtain the previous task in the list, given any valid task
+	list_entry(task->.prev, struct task_struct, tasks)
+	
+	// iterate over this process's children		
+	// http://stackoverflow.com/questions/11986893/when-does-task-struct-used
+	list_for_each(list, &current->children){
+		task = list_entry(list, struct task_struct, sibling);
+		// task now points to one of current's children	
+	}
+	
+	// iterate over the entire task list
+	rcu_read_lock();
+	do_each_thread(g,t){ // http://stackoverflow.com/questions/14005599/for-each-process-does-it-iterate-over-the-threads-and-the-processes-as-well
+	}while_each_thread(g,t);
+	rcu_read_unlock();
+*/
 
 // Our new kernel module function for UNSMITING
 asmlinkage long (*ref_sys_cs3013_syscall2)(void); // store the old one
@@ -96,7 +122,6 @@ asmlinkage long new_sys_cs3013_syscall2(int* p_num_pids_smited, int* p_smited_pi
 			return EFAULT;
 	}
 	
-	
 	printk(KERN_INFO "\"Un-Smiting processes.\" -- Unsmiter\n");
 	
 	// loop through the smited processes, unsmite them
@@ -108,18 +133,25 @@ asmlinkage long new_sys_cs3013_syscall2(int* p_num_pids_smited, int* p_smited_pi
 		rcu_read_lock();
 		pid_struct = find_get_pid((pid_t)smited_pids[num_pids_smited-1]); // find the pid struct from the pid number
 		rcu_read_unlock();
-		task = pid_task(pid_struct, PIDTYPE_PID); 	//get the task_struct from the pid struct.
+		task = get_pid_task(pid_struct, PIDTYPE_PID); 	//get the task_struct from the pid struct.
+				
+		// reset to previous state
+		set_task_state(task, pid_states[num_pids_smited-1]);
+		if (pid_states[num_pids_smited-1] == 0){
+			wake_up_process(task); // don't forget to wake up processes!
+		}
 		
-		//pid_struct = pid_task(find_vpid(pid), PIDTYPE_PID); // http://stackoverflow.com/questions/8547332/kernel-efficient-way-to-find-task-struct-by-pid
-		
-		//pid_struct =  find_pid((pid_t)smited_pids[num_pids_smited-1])
-		
-		task->state = pid_states[num_pids_smited-1];		// reset to previous state
 		num_pids_smited--;
 	}
 
 	return 0;
 }
+
+/* More helpful code and macros for PIDs and task_structs
+	pid_struct = pid_task(find_vpid(pid), PIDTYPE_PID); // http://stackoverflow.com/questions/8547332/kernel-efficient-way-to-find-task-struct-by-pid
+		
+	pid_struct =  find_pid((pid_t)smited_pids[num_pids_smited-1])
+*/
 
 // Finds the address of the system call table so we can replace some entries with our own functions.
 // Don't need to modify
