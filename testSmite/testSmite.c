@@ -83,7 +83,7 @@ void rabbit(){
 	// fork off a hundreds of children to see which ones get smited, yay!!!
 
 	char* strCommand = "sleep";
-	char* strSleepTime ="10";
+	char* strSleepTime ="2";
 	char* strArgumentsList[] = {strCommand, strSleepTime, NULL};
 	
 	int p=0;
@@ -96,16 +96,16 @@ void rabbit(){
 			setuid(TARGET_UID); // make the children's user be the target user.
 			
 			// twiddle
-			int run;
-			//for (run=0;run<10;run++){
-				unsigned long i = ULONG_MAX;
-				for (i=0;i<ULONG_MAX;i++){
-					char* myString = "Weeeeee!!!!!!";
-					strcmp(myString, "Weeeeee!!!!!nope");
-				}
-			//}
-			exit(0);			
-			//execvp("sleep", strArgumentsList);
+			/*int run;
+			unsigned long i = LONG_MAX;
+			for (i=0;i<UI_MAX;i++){
+				char* myString = "Weeeeee!!!!!!";
+				strcmp(myString, "Weeeeee!!!!!nope");
+			}
+			*/
+			//printf("Child process donw twiddling\n");
+			//exit(0);			
+			execvp("sleep", strArgumentsList);
 		}else{
 			printf("\tchild pid %lu\n", pid);
 		}

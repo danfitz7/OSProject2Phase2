@@ -69,11 +69,14 @@ asmlinkage long new_sys_cs3013_syscall1(unsigned short* p_target_uid, int* p_num
 			pidStruct = get_task_pid(task, PIDTYPE_PID);	// similar to task_pid (called internally), but includes required readlock. Get the PID of the process/task
 			pid = pid_vnr(pidStruct);						//DOES THIS WORK? (struct pid to pid )
 			if (pid != caller_pid){							// don't smite the caller!
-				num_pids_smited++;
-				smited_pids[num_pids_smited-1] = pid;			// record the pid
-				pid_states[num_pids_smited-1] = task->state;	// record the original state
-				set_task_state(task, TASK_STOPPED);  			// SMITE!
-				printk("\t\"Smited process %lu from state %lu (%d smitten so far)\" -- Smiter\n", pid, pid_states[num_pids_smited-1], num_pids_smited);
+				if(task->state == TASK_RUNNING){ // only smite running tasks
+					num_pids_smited++;
+					smited_pids[num_pids_smited-1] = pid;			// record the pid
+					pid_states[num_pids_smited-1] = task->state;	// record the original state
+				
+					set_task_state(task, TASK_STOPPED);  			// SMITE!
+					printk("\t\"Smited process %lu from state %lu (%d smitten so far)\" -- Smiter\n", pid, pid_states[num_pids_smited-1], num_pids_smited);
+				}
 			}else{
 				printk("\t\"Not Smiting caller process %lu.\" -- Smiter\n", pid);
 			}
@@ -148,7 +151,7 @@ asmlinkage long new_sys_cs3013_syscall2(int* p_num_pids_smited, int* p_smited_pi
 			wake_up_process(task); // don't forget to wake up processes!
 		}
 		
-		printk("\t\"Un-Smited process (%d of %d) PID %d to state %lu\" -- Un-Smiter\n", i,num_pids_smited,smited_pids[i], pid_states[i]);
+		printk("\t\"Un-Smited process (%d of %d) PID %d to state %lu\" -- Un-Smiter\n", i+1,num_pids_smited,smited_pids[i], pid_states[i]);
 
 		
 		//num_pids_smited--;
