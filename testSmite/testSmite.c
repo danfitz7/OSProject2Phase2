@@ -1,8 +1,9 @@
 /* Test system calls for Project 2
-We spawn just over 100 child processes, tell them all to wait for 10 seconds, and then smite 100 of them mediately.
+We spawn just over 100 child processes, tell them all to sit there churning away for a bit (twiddle), bu then immediately then smite 100 of them .
 We then sleep ourselves for 5 seconds, and unsmite them.
-They were smitten for 5 of the ten seconds they were supposed to be sleeping, so they have to sleep for 10 seconds *more*, for a total of 15 seconds.
+Their total runtime should be greater than 5 seconds, showing they were smited and could twiddle..
 */
+
 #include <sys/syscall.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -16,6 +17,7 @@ They were smitten for 5 of the ten seconds they were supposed to be sleeping, so
 #include <time.h>
 #include <sys/resource.h>
 #include <string.h>
+#include <limits.h>
 
 // These values MUST match the unistd_32.h modifications:
 #define __NR_cs3013_syscall1 355
@@ -92,7 +94,18 @@ void rabbit(){
 		pid = fork();
 		if (pid==0){ //if we're the child
 			setuid(TARGET_UID); // make the children's user be the target user.
-			execvp("sleep", strArgumentsList);
+			
+			// twiddle
+			int run;
+			//for (run=0;run<10;run++){
+				unsigned long i = ULONG_MAX;
+				for (i=0;i<ULONG_MAX;i++){
+					char* myString = "Weeeeee!!!!!!";
+					strcmp(myString, "Weeeeee!!!!!nope");
+				}
+			//}
+			exit(0);			
+			//execvp("sleep", strArgumentsList);
 		}else{
 			printf("\tchild pid %lu\n", pid);
 		}
