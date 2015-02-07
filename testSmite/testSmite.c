@@ -1,4 +1,8 @@
-/* Test system calls for Project 2*/
+/* Test system calls for Project 2
+We spawn just over 100 child processes, tell them all to wait for 10 seconds, and then smite 100 of them mediately.
+We then sleep ourselves for 5 seconds, and unsmite them.
+They were smitten for 5 of the ten seconds they were supposed to be sleeping, so they have to sleep for 10 seconds *more*, for a total of 15 seconds.
+*/
 #include <sys/syscall.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -35,14 +39,14 @@ long getTime(){
 }
 
 // wait for any children spawned by this process to finish, print their stats
-#define NUM_CHILDREN 105
+#define NUM_CHILDREN 105 // test with 105 child processes. 
 long startTime;
 void waitForChildrenToFinish(){
 	printf("Hanging for child processes...\n");
 	int status;
 	struct rusage current_usage;
 	int pid;
-
+	int numChildrenDead = 0;
 	pid = wait4((pid_t)-1, &status, WNOHANG, &current_usage); // don't hang or wait for all children to finish
 	while(pid !=0){ //Evaluates to a non-zero value if status was returned for a child process that terminated normally.
 		if (pid <0 ){
@@ -57,6 +61,7 @@ void waitForChildrenToFinish(){
 			}else{
 				printf("\tBackground child process %d exited normally.\n", pid);
 				printf("\tChild ran for %lu ms\n", (getTime()-startTime));
+				numChildrenDead++;
 			}
 		}else{
 			if (pid != -1){
@@ -67,16 +72,16 @@ void waitForChildrenToFinish(){
 		}
 		pid = wait4((pid_t)-1, &status, WNOHANG, &current_usage); // don't hang (don't wait for all children to finish)
 	}
-	printf("\tFinished waiting for children.\n");
+	printf("\tFinished waiting for all %d children to die.\n", numChildrenDead);
 }
 
 // fork off hundreds of children processes for testing.
-#define TARGET_UID 1002
+#define TARGET_UID 1001 // NOTE: There must be a user 1001 to target on the system!
 void rabbit(){
 	// fork off a hundreds of children to see which ones get smited, yay!!!
 
 	char* strCommand = "sleep";
-	char* strSleepTime ="5";
+	char* strSleepTime ="10";
 	char* strArgumentsList[] = {strCommand, strSleepTime, NULL};
 	
 	int p=0;
@@ -108,7 +113,7 @@ int main(int argc, const char* argv[]){
 	
 	rabbit();
 	
-	long syscall1result = testCall1(&target_uid, &num_pids_smited, smited_pids, pid_states);
+	long syscall1result = testCall1(&target_uid, &num_pids_smited, smited_pids, pid_states); // SMITE
 	printf("\tcs3013_syscall1: %ld\n", syscall1result);
 	if (syscall1result == 0){
 		printf("\n\nThere were %d processes smited:\n", num_pids_smited);
@@ -120,7 +125,7 @@ int main(int argc, const char* argv[]){
 		printf("Letting the smitten sleep...\n");
 		sleep(5); // sleep for a bit while the smitten process are stopped
 		
-		printf("\tcs3013_syscall2: %ld\n", testCall2(&num_pids_smited, smited_pids, pid_states));
+		printf("\tcs3013_syscall2: %ld\n", testCall2(&num_pids_smited, smited_pids, pid_states)); // UN-SMITE
 	}else{
 		printf("Not calling syscall2 because syscall1 failed.\n");
 	}
