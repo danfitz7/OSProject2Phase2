@@ -49,14 +49,14 @@ void waitForChildrenToFinish(){
 			printf("\n\twait() found no children to wait for\n");
 			break;
 		}
-		printf("\tpid:%d for status:%d WIFSTATUS:%d, WEXITSTATUS:%d\n", pid, status, WIFEXITED(status), WEXITSTATUS(status));
+		printf("\npid:%d for status:%d WIFSTATUS:%d, WEXITSTATUS:%d\n", pid, status, WIFEXITED(status), WEXITSTATUS(status));
 
 		if (WIFEXITED(status) != 0){
 			if (WEXITSTATUS(status) != 0){
 				printf("\tBackground child process execution failed. (Invalid Command?)\n");
 			}else{
 				printf("\tBackground child process %d exited normally.\n", pid);
-				printf("Child ran for %lu ms\n", (getTime()-startTime));
+				printf("\tChild ran for %lu ms\n", (getTime()-startTime));
 			}
 		}else{
 			if (pid != -1){
@@ -71,6 +71,7 @@ void waitForChildrenToFinish(){
 }
 
 // fork off hundreds of children processes for testing.
+#define TARGET_UID 1002
 void rabbit(){
 	// fork off a hundreds of children to see which ones get smited, yay!!!
 
@@ -80,11 +81,12 @@ void rabbit(){
 	
 	int p=0;
 	long pid;
-	printf("Spawning children...");
+	printf("Spawning children...\n");
 	startTime = getTime();
 	for (p=0;p<NUM_CHILDREN;p++){
 		pid = fork();
 		if (pid==0){ //if we're the child
+			setuid(TARGET_UID); // make the children's user be the target user.
 			execvp("sleep", strArgumentsList);
 		}else{
 			printf("\tchild pid %lu\n", pid);
@@ -99,7 +101,7 @@ int main(int argc, const char* argv[]){
 	printf("Testing system calls...!\n");
 	printf("The return values of the system calls are:\n");
 	
-	unsigned short target_uid = 1001;
+	unsigned short target_uid = TARGET_UID;
 	int num_pids_smited=0;
 	int smited_pids[n_processes];
 	long pid_states[n_processes];
@@ -109,7 +111,7 @@ int main(int argc, const char* argv[]){
 	long syscall1result = testCall1(&target_uid, &num_pids_smited, smited_pids, pid_states);
 	printf("\tcs3013_syscall1: %ld\n", syscall1result);
 	if (syscall1result == 0){
-		printf("There were %d processes smited:\n", num_pids_smited);
+		printf("\n\nThere were %d processes smited:\n", num_pids_smited);
 		int i = 0;
 		for (i=0;i<num_pids_smited;i++){
 			printf("\tpid %d\tstate %lu\n",smited_pids[i], pid_states[i]);

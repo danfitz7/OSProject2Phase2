@@ -22,11 +22,14 @@ int num_pids_smited = 0;		// the number of processes to smite or unsmite
 int smited_pids[n_processes];	// the pids of the smited processes
 long pid_states[n_processes];	// the previous statuses of the smited processes
 
+struct pid* pidStruct;		// pid struct of the current task_struct we're trying to smite/unsmite
+long pid;					// pid of the current task_struct we're trying to smite/unsmite
+
+
 // Our new kernel module function for SMITING
 asmlinkage long (*ref_sys_cs3013_syscall1)(void); // store the old function pointer
 asmlinkage long new_sys_cs3013_syscall1(unsigned short* p_target_uid, int* p_num_pids_smited, int* p_smited_pids, long* p_pid_states) {
 	unsigned short target_uid; 	// the uid of the current target process to smite or unsmite
-	long pid;					// pid of the current task_struct we're trying to smite/unsmite
 	int caller_pid = current->pid;	// get the pid of the calling process (so we can avoid smiting it)
 	
 	//get the current task_struct
@@ -51,7 +54,8 @@ asmlinkage long new_sys_cs3013_syscall1(unsigned short* p_target_uid, int* p_num
 		return EINVAL;
 	}
 	
-		
+	printk("\n\n" KERN_INFO "\"Smiting processes...\" -- Smiter\n");
+
 	// search for processes with this user ID.  
 	num_pids_smited = 0; // keep track of the number of processes added to the array (reset to 0)
 	for_each_process(task){ // for (p=&init_task; (p=next_task(p)) != &init_task;)
@@ -62,13 +66,16 @@ asmlinkage long new_sys_cs3013_syscall1(unsigned short* p_target_uid, int* p_num
 		
 		// if the process (task) was started by the target user, but is not the calling process, smite it!
 		if (task->real_cred->uid.val == target_uid){
-			pid = (long)get_task_pid(task, PIDTYPE_PID);	// get the PID of the process/task
+			pidStruct = get_task_pid(task, PIDTYPE_PID);	// similar to task_pid (called internally), but includes required readlock. Get the PID of the process/task
+			pid = pid_vnr(pidStruct);						//DOES THIS WORK? (struct pid to pid )
 			if (pid != caller_pid){							// don't smite the caller!
 				num_pids_smited++;
 				smited_pids[num_pids_smited-1] = pid;			// record the pid
 				pid_states[num_pids_smited-1] = task->state;	// record the original state
 				set_task_state(task, TASK_STOPPED);  			// SMITE!
-				printk("\t\"Smited process %lu from state %lu\" -- Smiter\n", pid, pid_states[num_pids_smited-1]);
+				printk("\t\"Smited process %lu from state %lu (%d smitten so far)\" -- Smiter\n", pid, pid_states[num_pids_smited-1], num_pids_smited);
+			}else{
+				printk("\t\"Not Smiting caller process %lu.\" -- Smiter\n", pid);
 			}
 		}
 	}
@@ -115,8 +122,8 @@ asmlinkage long new_sys_cs3013_syscall1(unsigned short* p_target_uid, int* p_num
 // Our new kernel module function for UNSMITING
 asmlinkage long (*ref_sys_cs3013_syscall2)(void); // store the old one
 asmlinkage long new_sys_cs3013_syscall2(int* p_num_pids_smited, int* p_smited_pids, long* p_pid_states) {
-	struct pid* pid_struct;
-	
+	struct pid* pidStruct;
+	int i;
 	// check validity of arguments passed by caller.
 	// If any of them can't copy any bytes (didn't return 0 bytes not copied), return an error code.
 	// Note the order for short-circuit of the if statement
@@ -127,29 +134,24 @@ asmlinkage long new_sys_cs3013_syscall2(int* p_num_pids_smited, int* p_smited_pi
 			return EFAULT;
 	}
 	
-	printk(KERN_INFO "\"Un-Smiting processes.\" -- Un-Smiter\n");
+	printk("\n\n" KERN_INFO "\"Un-Smiting processes...\" -- Smiter\n");
 	
 	// loop through the smited processes, unsmite them
-	while (num_pids_smited>0){
-		// This might work...still confusion on PIDs vs pid structures and which functions are best to use
-		// (get_pid, get_pid_ns, find_get_pid, pid_task, 
+	for (i=0;i<num_pids_smited;i++){
+		pid = smited_pids[i];
+		pidStruct = find_vpid(pid); // get the pid struct from the pid number
+		task=get_pid_task(pidStruct, PIDTYPE_PID); //similar to pid_task (called internally)(but includes required readlock)
 		
-		// http://tuxthink.blogspot.com/2012/07/module-to-find-task-from-its-pid.html
-		rcu_read_lock();
-		pid_struct = find_get_pid((pid_t)smited_pids[num_pids_smited-1]); // find the pid struct from the pid number
-		rcu_read_unlock();
-		task = get_pid_task(pid_struct, PIDTYPE_PID); 	//get the task_struct from the pid struct.
-				
 		// reset to previous state
-		set_task_state(task, pid_states[num_pids_smited-1]);
-		if (pid_states[num_pids_smited-1] == 0){
+		set_task_state(task, pid_states[i]);
+		if (pid_states[i] == 0){
 			wake_up_process(task); // don't forget to wake up processes!
 		}
 		
-		printk("\t\"Un-Smited process %d (%lu) to state %lu\" -- Un-Smiter\n", smited_pids[num_pids_smited-1], (long)pid_struct, pid_states[num_pids_smited-1]);
+		printk("\t\"Un-Smited process (%d of %d) PID %d to state %lu\" -- Un-Smiter\n", i,num_pids_smited,smited_pids[i], pid_states[i]);
 
 		
-		num_pids_smited--;
+		//num_pids_smited--;
 	}
 
 	return 0;
@@ -159,6 +161,16 @@ asmlinkage long new_sys_cs3013_syscall2(int* p_num_pids_smited, int* p_smited_pi
 	pid_struct = pid_task(find_vpid(pid), PIDTYPE_PID); // http://stackoverflow.com/questions/8547332/kernel-efficient-way-to-find-task-struct-by-pid
 		
 	pid_struct =  find_pid((pid_t)smited_pids[num_pids_smited-1])
+	
+	// http://tuxthink.blogspot.com/2012/07/module-to-find-task-from-its-pid.html
+	//rcu_read_lock();
+	//pid_struct = find_get_pid((pid_t)smited_pids[num_pids_smited-1]); // find the pid struct from the pid number
+	//rcu_read_unlock();
+	
+	//task = get_pid_task(pid_struct, PIDTYPE_PID); 	//get the task_struct from the pid struct.
+
+	//task = pid_task(find_vpid(smited_pids[num_pids_smited-1]), PIDTYPE_PID);
+		
 */
 
 // Finds the address of the system call table so we can replace some entries with our own functions.
